@@ -1,5 +1,6 @@
-from fastapi import WebSocket
+﻿from fastapi import WebSocket
 from typing import Dict, List
+
 
 class ConnectionManager:
     def __init__(self):
@@ -19,8 +20,12 @@ class ConnectionManager:
                 del self.active_connections[id_vehiculo]
 
     async def broadcast_to_vehicle(self, id_vehiculo: int, message: dict):
-        if id_vehiculo in self.active_connections:
-            for connection in self.active_connections[id_vehiculo]:
+        # Se recorre una copia y se descartan las conexiones caídas
+        for connection in list(self.active_connections.get(id_vehiculo, [])):
+            try:
                 await connection.send_json(message)
+            except Exception:
+                self.disconnect(connection, id_vehiculo)
+
 
 manager = ConnectionManager()

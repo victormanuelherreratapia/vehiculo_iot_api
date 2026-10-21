@@ -1,10 +1,11 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+﻿from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from app.websocket_manager import manager
 from app.repositories import IoTRepository
 
 router = APIRouter(tags=["WebSocket Monitoreo"])
 repo = IoTRepository()
+
 
 @router.websocket("/ws/vehiculo/{id_vehiculo}")
 async def websocket_endpoint(websocket: WebSocket, id_vehiculo: int):
@@ -19,4 +20,6 @@ async def websocket_endpoint(websocket: WebSocket, id_vehiculo: int):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket, id_vehiculo)

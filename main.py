@@ -1,11 +1,11 @@
-import hmac
+﻿import hmac
 
 from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.routers import vehiculos, websockets
+from app.routers import vehiculos, websockets, control_demo
 
 app = FastAPI(
     title="API Vehículo IoT - Entorno Dev",
@@ -32,6 +32,7 @@ async def proteger_operaciones(request: Request, call_next):
 
 app.include_router(vehiculos.router)
 app.include_router(websockets.router)
+app.include_router(control_demo.router)
 
 
 def custom_openapi():
