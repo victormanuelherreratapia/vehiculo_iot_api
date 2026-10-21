@@ -54,7 +54,8 @@ También existen `DEMO_CANCELADA` y `DEMO_ERROR`.
 ```bash
 pip install -r requirements.txt
 cp .env.example .env
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
 Las credenciales (`.env`) no se suben al repositorio.
+
