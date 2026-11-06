@@ -1,6 +1,7 @@
 ﻿import hmac
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
@@ -15,6 +16,15 @@ app = FastAPI(
 
 METODOS_SEGUROS = {"GET", "HEAD", "OPTIONS"}
 
+# Orígenes autorizados para la aplicación web de CONTROL (práctica 4.1).
+# CORS solo indica qué páginas pueden llamar a la API desde el navegador;
+# NO es autenticación: los POST siguen exigiendo X-API-Key.
+ORIGENES_PERMITIDOS = [
+    "https://victormanuelherreratapia.github.io",  # GitHub Pages
+    "http://127.0.0.1:5500",                        # Live Server (pruebas locales)
+    "http://localhost:5500",
+]
+
 
 @app.middleware("http")
 async def proteger_operaciones(request: Request, call_next):
@@ -28,6 +38,18 @@ async def proteger_operaciones(request: Request, call_next):
                 content={"detail": "API key inválida o ausente"},
             )
     return await call_next(request)
+
+
+# CORS se agrega después del middleware de la API key para que quede como la capa
+# más externa: así también las respuestas 401 llevan los encabezados CORS.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ORIGENES_PERMITIDOS,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key"],
+    allow_credentials=False,
+    max_age=600,
+)
 
 
 app.include_router(vehiculos.router)
