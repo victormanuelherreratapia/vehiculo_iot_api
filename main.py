@@ -1,4 +1,5 @@
-﻿import hmac
+import hmac
+import re
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,9 +17,23 @@ app = FastAPI(
 
 METODOS_SEGUROS = {"GET", "HEAD", "OPTIONS"}
 
+# Operaciones de CONTROL que la aplicación web usa sin clave.
+# El resto de los POST (crear, actualizar y eliminar vehículos, comandos y DEMO)
+# siguen protegidos con X-API-Key para que nadie pueda modificar RDS.
+RUTAS_CONTROL_PUBLICAS = [
+    re.compile(r"^/api/v1/movimientos/individual$"),
+    re.compile(r"^/api/v1/vehiculos/\d+/demos/\d+/iniciar$"),
+    re.compile(r"^/api/v1/vehiculos/\d+/demos/cancelar$"),
+]
+
+
+def es_ruta_control_publica(ruta: str) -> bool:
+    return any(patron.match(ruta) for patron in RUTAS_CONTROL_PUBLICAS)
+
+
 # Orígenes autorizados para la aplicación web de CONTROL (práctica 4.1).
 # CORS solo indica qué páginas pueden llamar a la API desde el navegador;
-# NO es autenticación: los POST siguen exigiendo X-API-Key.
+# NO es autenticación.
 ORIGENES_PERMITIDOS = [
     "https://victormanuelherreratapia.github.io",  # GitHub Pages
     "http://127.0.0.1:5500",                        # Live Server (pruebas locales)
@@ -28,8 +43,8 @@ ORIGENES_PERMITIDOS = [
 
 @app.middleware("http")
 async def proteger_operaciones(request: Request, call_next):
-    """Exige la cabecera X-API-Key en toda operación que modifica datos (POST)."""
-    if request.method not in METODOS_SEGUROS:
+    """Exige X-API-Key en los POST administrativos; las rutas de control son públicas."""
+    if request.method not in METODOS_SEGUROS and not es_ruta_control_publica(request.url.path):
         clave = request.headers.get("x-api-key", "")
         esperada = settings.API_KEY
         if not esperada or not hmac.compare_digest(clave.encode(), esperada.encode()):
@@ -58,7 +73,7 @@ app.include_router(control_demo.router)
 
 
 def custom_openapi():
-    """Muestra el botón Authorize en Swagger UI para los POST."""
+    """Muestra el candado (Authorize) solo en los POST que siguen protegidos."""
     if app.openapi_schema:
         return app.openapi_schema
     schema = get_openapi(
@@ -73,8 +88,9 @@ def custom_openapi():
         "name": "X-API-Key",
     }
     for path, metodos in schema["paths"].items():
+        ruta_ejemplo = re.sub(r"\{[^}]+\}", "1", path)
         for metodo, operacion in metodos.items():
-            if metodo.lower() == "post":
+            if metodo.lower() == "post" and not es_ruta_control_publica(ruta_ejemplo):
                 operacion["security"] = [{"ApiKeyAuth": []}]
     app.openapi_schema = schema
     return schema
