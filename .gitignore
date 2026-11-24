@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 .env
 .venv/
+
+crear_comandos.py
+kill.py

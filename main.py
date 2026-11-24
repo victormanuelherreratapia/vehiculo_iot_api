@@ -1,107 +1,69 @@
-import hmac
-import re
+import asyncio
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
-from app.config import settings
-from app.routers import vehiculos, websockets, control_demo
+from app.database import consultar
+from app.routers import admin, auth, control_demo, cuenta, invitado, vehiculos, websockets
 
 app = FastAPI(
-    title="API Vehículo IoT - Entorno Dev",
-    description="API REST con FastAPI, POO, RDS MySQL y WebSockets para el control de vehículos IoT.",
-    version="1.0.0"
+    title="API Vehículo IoT - Plataforma comercial",
+    description=(
+        "API REST + WebSocket para CONTROL, MONITOREO y ADMINISTRACIÓN de vehículos IoT "
+        "(FastAPI, POO, Amazon RDS MySQL).\n\n"
+        "**Roles:** ADMIN (empresa), USUARIO (comprador) e INVITADO (prueba temporal).\n\n"
+        "1. `POST /api/v1/auth/login` (o `POST /api/v1/invitado/sesiones`) devuelve un token.\n"
+        "2. Botón **Authorize** → pega el token en *BearerAuth*.\n\n"
+        "Cada ruta comprueba el rol **y** el permiso sobre la unidad concreta (propiedad, reserva o soporte)."
+    ),
+    version="4.3.0",
 )
 
-METODOS_SEGUROS = {"GET", "HEAD", "OPTIONS"}
-
-# Operaciones de CONTROL que la aplicación web usa sin clave.
-# El resto de los POST (crear, actualizar y eliminar vehículos, comandos y DEMO)
-# siguen protegidos con X-API-Key para que nadie pueda modificar RDS.
-RUTAS_CONTROL_PUBLICAS = [
-    re.compile(r"^/api/v1/movimientos/individual$"),
-    re.compile(r"^/api/v1/vehiculos/\d+/demos/\d+/iniciar$"),
-    re.compile(r"^/api/v1/vehiculos/\d+/demos/cancelar$"),
-]
-
-
-def es_ruta_control_publica(ruta: str) -> bool:
-    return any(patron.match(ruta) for patron in RUTAS_CONTROL_PUBLICAS)
-
-
-# Orígenes autorizados para la aplicación web de CONTROL (práctica 4.1).
-# CORS solo indica qué páginas pueden llamar a la API desde el navegador;
-# NO es autenticación.
+# Orígenes autorizados (CORS solo indica qué páginas pueden llamar a la API
+# desde el navegador; NO es autenticación ni protege el WebSocket).
 ORIGENES_PERMITIDOS = [
     "https://victormanuelherreratapia.github.io",  # GitHub Pages
     "http://127.0.0.1:5500",                        # Live Server (pruebas locales)
     "http://localhost:5500",
 ]
 
-
-@app.middleware("http")
-async def proteger_operaciones(request: Request, call_next):
-    """Exige X-API-Key en los POST administrativos; las rutas de control son públicas."""
-    if request.method not in METODOS_SEGUROS and not es_ruta_control_publica(request.url.path):
-        clave = request.headers.get("x-api-key", "")
-        esperada = settings.API_KEY
-        if not esperada or not hmac.compare_digest(clave.encode(), esperada.encode()):
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "API key inválida o ausente"},
-            )
-    return await call_next(request)
-
-
-# CORS se agrega después del middleware de la API key para que quede como la capa
-# más externa: así también las respuestas 401 llevan los encabezados CORS.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGENES_PERMITIDOS,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "X-API-Key"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
     allow_credentials=False,
     max_age=600,
 )
 
-
+app.include_router(auth.router)
+app.include_router(invitado.router)
+app.include_router(cuenta.router)
+app.include_router(admin.router)
 app.include_router(vehiculos.router)
-app.include_router(websockets.router)
 app.include_router(control_demo.router)
+app.include_router(websockets.router)
 
 
-def custom_openapi():
-    """Muestra el candado (Authorize) solo en los POST que siguen protegidos."""
-    if app.openapi_schema:
-        return app.openapi_schema
-    schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-    )
-    schema.setdefault("components", {}).setdefault("securitySchemes", {})["ApiKeyAuth"] = {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-API-Key",
-    }
-    for path, metodos in schema["paths"].items():
-        ruta_ejemplo = re.sub(r"\{[^}]+\}", "1", path)
-        for metodo, operacion in metodos.items():
-            if metodo.lower() == "post" and not es_ruta_control_publica(ruta_ejemplo):
-                operacion["security"] = [{"ApiKeyAuth": []}]
-    app.openapi_schema = schema
-    return schema
-
-
-app.openapi = custom_openapi
+@app.on_event("startup")
+async def iniciar_tareas():
+    # Cierra pruebas de invitado vencidas o sin conexión y detiene la unidad
+    app.state.vigilante = asyncio.create_task(invitado.vigilante_invitados())
 
 
 @app.get("/", tags=["Root"])
 def root():
     return {"mensaje": "Servidor de API IoT ejecutándose correctamente"}
+
+
+@app.get("/api/v1/salud", tags=["Root"], summary="Salud de la API y diagnóstico de RDS (desde el backend)")
+async def salud():
+    try:
+        await asyncio.to_thread(consultar, "SELECT 1 AS ok", (), True)
+        return {"api": "disponible", "rds": "disponible"}
+    except Exception:
+        return JSONResponse(status_code=503, content={"api": "disponible", "rds": "no disponible"})
 
 
 if __name__ == "__main__":
